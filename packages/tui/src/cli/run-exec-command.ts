@@ -98,6 +98,7 @@ export async function runTuiExecCommand(
         ...(invocation.effort ? { effort: invocation.effort } : {}),
         ...(invocation.sessionId ? { sessionId: invocation.sessionId } : {}),
         continueSession: invocation.continueSession,
+        ...(invocation.title ? { title: invocation.title } : {}),
         permission: invocation.permission,
         ...(invocation.diagnosticsDir ? { diagnosticsDir: invocation.diagnosticsDir } : {}),
         ...(invocation.timeoutMs !== undefined ? { timeoutMs: invocation.timeoutMs } : {}),

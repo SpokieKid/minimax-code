@@ -78,6 +78,11 @@ export interface TuiExecInput {
   effort?: string;
   sessionId?: string;
   continueSession?: boolean;
+  /**
+   * Explicit Session title for newly created Sessions. Resuming an existing
+   * Session (sessionId/continueSession) ignores this field.
+   */
+  title?: string;
   permission?: TuiPermissionPolicy;
   timeoutMs?: number;
   maxSteps?: number;
@@ -865,7 +870,8 @@ async function resolveSession(
   }
   return runtime.createSession({
     workspaceDir: input.workspaceDir,
-    title: summarizePrompt(input.prompt, input.attachments?.length ?? 0),
+    title:
+      input.title ?? summarizePrompt(input.prompt, input.attachments?.length ?? 0),
   });
 }
 

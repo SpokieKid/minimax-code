@@ -36,6 +36,7 @@ export interface RawTuiExecOptions extends RawSystemPromptOptions {
   promptMode?: string;
   session?: string;
   continue?: boolean;
+  title?: string;
   config?: string;
   permission?: string;
   timeout?: string;
@@ -57,6 +58,13 @@ export interface ResolvedTuiExecInvocation {
   promptMode?: 'tui' | 'coding' | 'work';
   sessionId?: string;
   continueSession: boolean;
+  /**
+   * Optional Session title supplied by the caller. When present, used in place
+   * of the auto-derived title for any newly created Session. Ignored when
+   * resuming an existing Session (--session) or continuing the latest one
+   * (--continue), since those Sessions already have a title.
+   */
+  title?: string;
   configPath?: string;
   permission: TuiPermissionPolicy;
   timeoutMs?: number;
@@ -145,7 +153,9 @@ export async function resolveTuiExecInvocation(
   throwIfAborted(signal);
   const rawInput = options.input === '-' ? await readStdin() : (promptArgument ?? '');
   throwIfAborted(signal);
-  const prompt = parsePrompt(rawInput, inputFormat);
+  const parsedInput = parsePrompt(rawInput, inputFormat);
+  const prompt = parsedInput.prompt;
+  const titleFromInput = parsedInput.title;
   const attachments = await Promise.all(
     (options.file ?? []).map((file) => resolveHeadlessAttachment(file, workspaceDir, signal)),
   );
@@ -161,6 +171,14 @@ export async function resolveTuiExecInvocation(
   if (!prompt.trim() && attachments.length === 0) {
     throw invocationError('A prompt, --input -, or at least one --file is required.');
   }
+  // --title only applies to newly created Sessions. Resuming or continuing
+  // already-pinned Sessions preserves their existing title.
+  if (options.title !== undefined && (options.session || options.continue)) {
+    throw invocationError(
+      '--title requires a new Session and cannot be combined with --session or --continue.',
+    );
+  }
+  const title = readTitleOption(options.title, titleFromInput);
 
   const timeoutMs =
     options.timeout === undefined ? undefined : parseDuration(options.timeout, '--timeout');
@@ -200,6 +218,7 @@ export async function resolveTuiExecInvocation(
     ...(contextMode === 'lightweight' ? { contextMode } : {}),
     ...(options.session?.trim() ? { sessionId: options.session.trim() } : {}),
     continueSession: options.continue === true,
+    ...(title ? { title } : {}),
     ...(configPath ? { configPath } : {}),
     permission,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
@@ -395,26 +414,61 @@ function expandPath(reference: string, baseDir: string): string {
   return isAbsolute(expanded) ? resolve(expanded) : resolve(baseDir, expanded);
 }
 
-function parsePrompt(value: string, format: TuiInputFormat): string {
-  if (format === 'text') return value;
+interface ParsedPromptInput {
+  prompt: string;
+  title?: string;
+}
+
+function parsePrompt(value: string, format: TuiInputFormat): ParsedPromptInput {
+  if (format === 'text') return { prompt: value };
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
   } catch (error) {
     throw invocationError('--input-format json requires valid JSON.', error);
   }
-  if (typeof parsed === 'string') return parsed;
+  if (typeof parsed === 'string') return { prompt: parsed };
   if (
     parsed &&
     typeof parsed === 'object' &&
     !Array.isArray(parsed) &&
     typeof (parsed as { prompt?: unknown }).prompt === 'string'
   ) {
-    return (parsed as { prompt: string }).prompt;
+    const prompt = (parsed as { prompt: string }).prompt;
+    const rawTitle = (parsed as { title?: unknown }).title;
+    return {
+      prompt,
+      ...(typeof rawTitle === 'string' ? { title: rawTitle } : {}),
+    };
   }
   throw invocationError(
     '--input-format json accepts a JSON string or an object with string prompt.',
   );
+}
+
+/**
+ * Resolve the Session title from the `--title` CLI option and the JSON-input
+ * `title` field. Both sources are validated together: a blank/whitespace-only
+ * value is treated as an error (the caller almost certainly meant to set a
+ * title), and long titles are capped at 80 characters to match the
+ * auto-derivation policy in `summarizePrompt`.
+ */
+function readTitleOption(
+  flagValue: string | undefined,
+  inputValue: string | undefined,
+): string | undefined {
+  const candidates = [flagValue, inputValue].filter(
+    (value): value is string => typeof value === 'string',
+  );
+  if (candidates.length === 0) return undefined;
+  // The CLI flag takes precedence over the JSON-input title so that an
+  // operator override is never silently downgraded by stdin content.
+  const [raw] = candidates;
+  const trimmed = raw.replace(/\s+/g, ' ').trim();
+  if (!trimmed) {
+    throw invocationError('--title cannot be empty or whitespace-only.');
+  }
+  return trimmed.length > 80 ? `${trimmed.slice(0, 77)}...` : trimmed;
 }
 
 function parseDuration(value: string, option: string): number {

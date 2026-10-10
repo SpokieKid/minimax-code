@@ -148,6 +148,12 @@ export function applyExecCliContract(command: Command): Command {
     .addOption(new Option('--session <id>', 'run in an existing active Session'))
     .addOption(new Option('--continue', 'continue the latest active Session in --cwd'))
     .addOption(
+      new Option(
+        '--title <name>',
+        'name the new Session explicitly instead of deriving a title from the prompt',
+      ),
+    )
+    .addOption(
       new Option('--config <path>', 'use an explicit Runtime config file for this process'),
     )
     .addOption(

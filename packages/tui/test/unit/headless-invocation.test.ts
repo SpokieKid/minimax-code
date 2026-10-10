@@ -471,6 +471,59 @@ describe('headless invocation', () => {
   });
 });
 
+describe('Session title', () => {
+  it('passes --title through to a new Session and trims internal whitespace', async () => {
+    const cwd = await workspace();
+    await expect(
+      resolveTuiExecInvocation('prompt', { cwd, title: '  fix login  500  ' }, async () => ''),
+    ).resolves.toMatchObject({ title: 'fix login 500' });
+  });
+
+  it('caps --title at 80 chars with an ellipsis suffix', async () => {
+    const cwd = await workspace();
+    const long = 'x'.repeat(200);
+    const resolved = await resolveTuiExecInvocation('prompt', { cwd, title: long }, async () => '');
+    expect(resolved.title?.length).toBeLessThanOrEqual(80);
+    expect(resolved.title?.endsWith('...')).toBe(true);
+  });
+
+  it('rejects empty or whitespace-only --title', async () => {
+    const cwd = await workspace();
+    for (const value of ['', '   ', '\n\t']) {
+      await expect(
+        resolveTuiExecInvocation('prompt', { cwd, title: value }, async () => ''),
+      ).rejects.toThrow('--title cannot be empty or whitespace-only');
+    }
+  });
+
+  it('rejects --title combined with --session or --continue', async () => {
+    const cwd = await workspace();
+    await expect(
+      resolveTuiExecInvocation('prompt', { cwd, session: 'mvs_x', title: 'name' }, async () => ''),
+    ).rejects.toThrow('--title requires a new Session');
+    await expect(
+      resolveTuiExecInvocation('prompt', { cwd, continue: true, title: 'name' }, async () => ''),
+    ).rejects.toThrow('--title requires a new Session');
+  });
+
+  it('extracts title from JSON stdin `{prompt, title}`', async () => {
+    const cwd = await workspace();
+    await expect(
+      resolveTuiExecInvocation(
+        undefined,
+        { cwd, input: '-', inputFormat: 'json' },
+        async () => JSON.stringify({ prompt: 'do work', title: '  from stdin  ' }),
+      ),
+    ).resolves.toMatchObject({ prompt: 'do work', title: 'from stdin' });
+  });
+
+  it('leaves title undefined when neither --title nor JSON.title is provided', async () => {
+    const cwd = await workspace();
+    const resolved = await resolveTuiExecInvocation('prompt', { cwd }, async () => '');
+    expect(resolved.title).toBeUndefined();
+  });
+});
+
 describe('Prompt mode selection', () => {
   it.each([undefined, 'tui', 'coding', 'work'])(
     'resolves %s before runtime startup',
